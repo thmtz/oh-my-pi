@@ -1386,6 +1386,8 @@ export interface RpcModeOptions {
 	createDictationController?: RpcDictationControllerFactory;
 	/** The session's MCP manager, so `/mcp` builtins resolve and reconnect live servers. */
 	mcpManager?: MCPManager;
+	/** Goal-only wait boundary for tests; idle maintenance still uses the session's real barriers. */
+	goalWaitForIdle?: () => Promise<void>;
 }
 
 /**
@@ -1400,6 +1402,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 		input = claimRpcInput(),
 		createLiveSession,
 		createDictationController,
+		goalWaitForIdle,
 	} = options;
 	// Signal to RPC clients that the server is ready to accept commands
 	// Suppress terminal notifications: they write \x07 (BEL) or OSC sequences directly to
@@ -1456,8 +1459,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
 	const wordPredictor = new RpcWordPredictor();
 	const btw = new RpcBtwController(session, output);
-	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
-	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
+	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement and idle work.
+	const goalController = new RpcGoalController(
+		session,
+		() => {
+			session.refreshIdleMaintenance();
+			void settleWatcher.check();
+		},
+		goalWaitForIdle,
+	);
 	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
 	// and any report of "not settled" for that reason is later closed by `session_settled`.
 	const goalTurnScheduled = watchedScheduledTurnProbe(
@@ -1756,6 +1766,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	};
 	inputRead.then(rejectStartupDialogs, rejectStartupDialogs);
 
+	let rpcStartupComplete = false;
+	session.enableIdleMaintenance({
+		recap: false,
+		isBlocked: () => !rpcStartupComplete,
+		scheduledTurn: goalTurnScheduled,
+	});
+
 	// Set up extensions with RPC-based UI context
 	await initializeExtensions(session, {
 		mode: "rpc",
@@ -1813,6 +1830,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	});
 	await goalController.reconcile();
 	await goalController.settled();
+	rpcStartupComplete = true;
+	session.refreshIdleMaintenance();
 
 	// Discriminates a store failure from any other dispose rejection below.
 	let persistenceFailure: Error | undefined;
