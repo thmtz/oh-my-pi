@@ -1,0 +1,36 @@
+// Neuralwatt Cloud (https://docs.neuralwatt.com): OpenAI-compatible inference
+// for open-weight models at https://api.neuralwatt.com/v1.
+//
+// `GET /v1/models` is public, so generation and keyless runtime discovery see
+// the public roster; with a key it can also list models private to that
+// account. Each row carries its display name, per-million pricing, context and
+// output limits, capability flags, and the reasoning efforts the deployment
+// accepts (https://docs.neuralwatt.com/api/models), so live discovery is the
+// deployment truth. `nw-large`, `nw-flash` and `nw-small` are tracking aliases
+// that move to newer models over time.
+provider "neuralwatt" {
+	default-model "nw-large"
+	env "NEURALWATT_API_KEY"
+	dynamic-models-authoritative #true
+	// Same-id rows on other hosts describe different deployments.
+	skip-cross-provider-reference-fills #true
+	discovery label="Neuralwatt" allow-unauthenticated=#true
+
+	// `metadata.limits.max_output_tokens` is null where the deployment sets no
+	// output cap below the context window (`nw-large`, `glm-5.3`). Seed a budget
+	// for those rows instead of leaving output unknown.
+	max-tokens-fallback 131072
+
+	// Rows report `developer_role: false`: system prompts ride the `system`
+	// role. Output caps ride `max_tokens`, and no `store` field is sent.
+	supports-developer-role #false
+	supports-store #false
+	max-tokens-field "max_tokens"
+
+	// Reasoning streams back in `reasoning_content` or `reasoning`, depending
+	// on the model. Replay it in the field it arrived in, as the model's own
+	// host does: a tracking alias carries no model identity, so without this
+	// `nw-large` drops the reasoning on tool-call turns that `kimi-k3.1-pro`,
+	// the model it points at, keeps.
+	replay-reasoning-content #true
+}

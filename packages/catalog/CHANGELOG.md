@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added Neuralwatt (`neuralwatt`) with live model discovery from `https://api.neuralwatt.com/v1/models` and `/login neuralwatt` (`NEURALWATT_API_KEY`)
 - Added `uncached-instructions` compatibility flag, enabled for GPT-6.2 models on every host, which moves the system prompt out of the uncached Responses `instructions` field
 
 ### Fixed

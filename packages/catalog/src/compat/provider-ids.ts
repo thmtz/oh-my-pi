@@ -61,6 +61,7 @@ export type KnownProvider =
 	| "muse-code"
 	| "nace"
 	| "nanogpt"
+	| "neuralwatt"
 	| "novita"
 	| "nvidia"
 	| "ollama"

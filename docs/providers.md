@@ -183,6 +183,7 @@ The variables below supply credentials after runtime/config overrides and stored
 | `helmcode`                       | `HELMCODE_API_KEY`                                                                  |
 | `meta`                           | `MODEL_API_KEY`, then `META_API_KEY`                                                |
 | `nanogpt`                        | `NANO_GPT_API_KEY`                                                                  |
+| `neuralwatt`                     | `NEURALWATT_API_KEY`                                                                |
 | `novita`                         | `NOVITA_API_KEY`                                                                    |
 | `venice`                         | `VENICE_API_KEY`                                                                    |
 | `vercel-ai-gateway`              | `AI_GATEWAY_API_KEY` (also `VERCEL_AI_GATEWAY_API_KEY` for catalog discovery)       |

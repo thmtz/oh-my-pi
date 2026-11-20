@@ -4929,6 +4929,116 @@ export function chutesModelManagerOptions(config?: SimpleProviderConfig): ModelM
 }
 
 // ---------------------------------------------------------------------------
+// Neuralwatt
+// ---------------------------------------------------------------------------
+
+const NEURALWATT_BASE_URL = "https://api.neuralwatt.com/v1";
+
+/**
+ * Neuralwatt's effort vocabulary: `metadata.reasoning.supported_efforts` lists
+ * the efforts the deployment serves, with `none` as its off value (not an
+ * Effort). A `mandatory` row has no off value, so a thinking-off request
+ * clamps to the lowest effort instead.
+ */
+function mapNeuralwattReasoning(
+	reasoning: boolean,
+	controls: Record<string, unknown> | undefined,
+): Pick<ModelSpec<"openai-completions">, "thinking"> & { reasoningDisableMode?: "none-effort" | "lowest-effort" } {
+	const advertised = controls?.supported_efforts;
+	const wireEfforts: unknown[] = Array.isArray(advertised) ? advertised : [];
+	const efforts = reasoning ? THINKING_EFFORTS.filter(effort => wireEfforts.includes(effort)) : [];
+	if (efforts.length === 0) return { thinking: undefined };
+	const defaultLevel = efforts.find(effort => effort === controls?.default_effort);
+	const mandatory = controls?.mandatory === true;
+	return {
+		thinking: {
+			mode: "effort",
+			efforts,
+			...(defaultLevel !== undefined && { defaultLevel }),
+			...(mandatory && { requiresEffort: true }),
+		},
+		reasoningDisableMode: !mandatory && wireEfforts.includes("none") ? "none-effort" : "lowest-effort",
+	};
+}
+
+/**
+ * Map one Neuralwatt `/v1/models` row (https://docs.neuralwatt.com/api/models).
+ * Model facts live under `metadata`: `display_name`, `pricing` (USD per
+ * million tokens), `limits`, `capabilities`, and `reasoning`. Rows a chat
+ * agent cannot use are dropped: deprecated ones, ones without tool calling
+ * (decision models such as `mammoth-1`), and ones without an established
+ * price. A null `max_output_tokens` stays unknown here; the provider's
+ * `max-tokens-fallback` rule seeds it.
+ */
+function mapNeuralwattModel(
+	entry: OpenAICompatibleModelRecord,
+	defaults: ModelSpec<"openai-completions">,
+): ModelSpec<"openai-completions"> | null {
+	const metadata = isRecord(entry.metadata) ? entry.metadata : {};
+	const capabilities = isRecord(metadata.capabilities) ? metadata.capabilities : {};
+	const pricing = isRecord(metadata.pricing) ? metadata.pricing : undefined;
+	const limits = isRecord(metadata.limits) ? metadata.limits : {};
+	if (metadata.deprecated === true || capabilities.tools !== true) return null;
+	const input = toNumber(pricing?.input_per_million);
+	const output = toNumber(pricing?.output_per_million);
+	if (pricing?.pricing_tbd === true || input === undefined || output === undefined || input < 0 || output < 0) {
+		return null;
+	}
+	const reasoning = capabilities.reasoning === true;
+	const { thinking, reasoningDisableMode } = mapNeuralwattReasoning(
+		reasoning,
+		isRecord(metadata.reasoning) ? metadata.reasoning : undefined,
+	);
+	return {
+		...defaults,
+		name: toModelName(metadata.display_name, defaults.name),
+		reasoning,
+		thinking,
+		// The row's effort list is the whole truth: an empty one must not regrow
+		// a guessed dial from model identity.
+		compat: { trustExplicitThinkingOnly: true, ...(reasoningDisableMode && { reasoningDisableMode }) },
+		input: capabilities.vision === true ? ["text", "image"] : ["text"],
+		supportsTools: true,
+		cost: {
+			input,
+			output,
+			cacheRead: Math.max(toNumber(pricing?.cached_input_per_million) ?? 0, 0),
+			cacheWrite: 0,
+		},
+		contextWindow: toPositiveNumber(limits.max_context_length, toPositiveNumber(entry.max_model_len, null)),
+		maxTokens: toPositiveNumber(limits.max_output_tokens, null),
+	};
+}
+
+/**
+ * Builds Neuralwatt's model-discovery manager (`/v1/models`). The endpoint is
+ * public, so discovery runs without a key; with one it may also list models
+ * private to that account.
+ */
+export function neuralwattModelManagerOptions(
+	config?: SimpleProviderConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return {
+		providerId: "neuralwatt",
+		// Live rows are the deployment truth for the roster, reasoning,
+		// modality, and price (an explicit `0` cache-read rate stays `0`).
+		dynamicModelsAuthoritative: true,
+		dynamicReasoningAuthoritative: true,
+		dynamicInputAuthoritative: true,
+		dynamicCostAuthoritative: true,
+		fetchDynamicModels: () =>
+			fetchOpenAICompatibleModels({
+				api: "openai-completions",
+				provider: "neuralwatt",
+				baseUrl: config?.baseUrl ?? NEURALWATT_BASE_URL,
+				apiKey: config?.apiKey,
+				fetch: config?.fetch,
+				mapModel: mapNeuralwattModel,
+			}),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Inception
 // ---------------------------------------------------------------------------
 
