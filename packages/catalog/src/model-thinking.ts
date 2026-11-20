@@ -55,6 +55,9 @@ export function withoutUnverifiedThinking<T extends { reasoning?: boolean; think
  * a served tier that reaches the wire unchanged (a gateway answering `medium`
  * as `high`); otherwise it climbs down to the nearest lower tier.
  *
+ * On Chat Completions, a level the map sends to `none` (reasoning off) is kept,
+ * so `none` reaches the wire.
+ *
  * Non-reasoning models always resolve to `undefined`.
  */
 export function clampThinkingLevelForModel<TApi extends Api>(
@@ -77,6 +80,11 @@ export function clampThinkingLevelForModel<TApi extends Api>(
 	const aliased = effortMap?.[requested] as Effort | undefined;
 	if (aliased !== undefined && levels.includes(aliased) && (effortMap![aliased] ?? aliased) === aliased) {
 		return aliased;
+	}
+	// An alias to `none` asks for reasoning off. The Chat Completions encoder
+	// sends a mapped value as is, so keep the request for it to send `none`.
+	if (model.api === "openai-completions" && (aliased as string | undefined) === "none") {
+		return requested;
 	}
 
 	const requestedIndex = THINKING_EFFORTS.indexOf(requested);

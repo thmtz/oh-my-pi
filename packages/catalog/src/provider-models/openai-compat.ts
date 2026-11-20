@@ -4929,6 +4929,155 @@ export function chutesModelManagerOptions(config?: SimpleProviderConfig): ModelM
 }
 
 // ---------------------------------------------------------------------------
+// Neuralwatt
+// ---------------------------------------------------------------------------
+
+const NEURALWATT_BASE_URL = "https://api.neuralwatt.com/v1";
+
+/**
+ * Neuralwatt's effort vocabulary. `metadata.reasoning.supported_efforts` lists
+ * the efforts the model serves, with `none` as its off value (not an Effort).
+ * A `mandatory` row has no off value, so a thinking-off request clamps to the
+ * lowest effort. `effort_aliases` says what the server does with every other
+ * effort, such as `high` to `xhigh` on `nw-small` or `minimal` to `none` on
+ * `mimo-v2.6-pro`. The served efforts stay the selectable ladder, and the
+ * aliases go in the effort maps so a configured or programmatic request for
+ * any other effort gets what the server would give it.
+ *
+ * `requiresEffort` and the effort maps are always set. Left unset, class
+ * rules fill them in for ids they recognize. The Kimi K3 rules would then make
+ * `kimi-k3.1-pro` mandatory and send `high` for `medium`, which the row does
+ * not ask for.
+ */
+function mapNeuralwattReasoning(
+	reasoning: boolean,
+	controls: Record<string, unknown> | undefined,
+): Pick<ModelSpec<"openai-completions">, "thinking"> & {
+	reasoningDisableMode?: "none-effort" | "lowest-effort";
+	reasoningEffortMap?: Partial<Record<Effort, string>>;
+} {
+	const advertised = controls?.supported_efforts;
+	const wireEfforts: unknown[] = Array.isArray(advertised) ? advertised : [];
+	const efforts = reasoning ? THINKING_EFFORTS.filter(effort => wireEfforts.includes(effort)) : [];
+	if (efforts.length === 0) return { thinking: undefined };
+	// A `none` default (off until the user opts in) has no ThinkingConfig
+	// representation, so such rows fall back to the session's default level.
+	const defaultLevel = efforts.find(effort => effort === controls?.default_effort);
+	const mandatory = controls?.mandatory === true;
+	const offValue = !mandatory && wireEfforts.includes("none") ? "none" : undefined;
+	const aliases = isRecord(controls?.effort_aliases) ? controls.effort_aliases : {};
+	const effortMap: Partial<Record<Effort, string>> = {};
+	for (const effort of THINKING_EFFORTS) {
+		const target = efforts.includes(effort) ? effort : aliases[effort];
+		if (efforts.includes(target as Effort) || (offValue !== undefined && target === offValue)) {
+			effortMap[effort] = target as string;
+		}
+	}
+	return {
+		thinking: {
+			mode: "effort",
+			efforts,
+			...(defaultLevel !== undefined && { defaultLevel }),
+			requiresEffort: mandatory,
+			effortMap,
+		},
+		reasoningDisableMode: offValue !== undefined ? "none-effort" : "lowest-effort",
+		// The wire encoder reads the compat map before the thinking map.
+		reasoningEffortMap: effortMap,
+	};
+}
+
+/**
+ * Map one Neuralwatt `/v1/models` row (https://docs.neuralwatt.com/api/models).
+ * Model facts live under `metadata`: `display_name`, `pricing` (USD per
+ * million tokens), `limits`, `capabilities`, and `reasoning`.
+ *
+ * Deprecated rows and rows without tool calling (decision models such as
+ * `mammoth-1`) are dropped. A row without an established price stays listed
+ * with `pricingStatus: "unknown"`, as SambaNova and Modal do, so it never
+ * reads as free. A null `max_output_tokens` stays unknown here, and the
+ * provider's `max-tokens-fallback` rule seeds it. `capabilities.audio_input`
+ * has no `input` representation yet, so audio rows map as text and image.
+ */
+function mapNeuralwattModel(
+	entry: OpenAICompatibleModelRecord,
+	defaults: ModelSpec<"openai-completions">,
+): ModelSpec<"openai-completions"> | null {
+	const metadata = isRecord(entry.metadata) ? entry.metadata : {};
+	const capabilities = isRecord(metadata.capabilities) ? metadata.capabilities : {};
+	const pricing = isRecord(metadata.pricing) ? metadata.pricing : {};
+	const limits = isRecord(metadata.limits) ? metadata.limits : {};
+	if (metadata.deprecated === true || capabilities.tools !== true) return null;
+	const input = toNumber(pricing.input_per_million);
+	const output = toNumber(pricing.output_per_million);
+	const priced =
+		pricing.pricing_tbd !== true && input !== undefined && output !== undefined && input >= 0 && output >= 0;
+	const reasoning = capabilities.reasoning === true;
+	const { thinking, reasoningDisableMode, reasoningEffortMap } = mapNeuralwattReasoning(
+		reasoning,
+		isRecord(metadata.reasoning) ? metadata.reasoning : undefined,
+	);
+	return {
+		...defaults,
+		name: toModelName(metadata.display_name, defaults.name),
+		reasoning,
+		thinking,
+		// Use only the row's effort list. A row without one must not gain an
+		// effort selector from model identity.
+		compat: {
+			trustExplicitThinkingOnly: true,
+			...(reasoningDisableMode && { reasoningDisableMode }),
+			...(reasoningEffortMap && { reasoningEffortMap }),
+		},
+		input: capabilities.vision === true ? ["text", "image"] : ["text"],
+		supportsTools: true,
+		cost: priced
+			? {
+					input,
+					output,
+					cacheRead: Math.max(toNumber(pricing.cached_input_per_million) ?? 0, 0),
+					cacheWrite: 0,
+				}
+			: defaults.cost,
+		...(!priced && { pricingStatus: "unknown" as const }),
+		contextWindow: toPositiveNumber(limits.max_context_length, toPositiveNumber(entry.max_model_len, null)),
+		maxTokens: toPositiveNumber(limits.max_output_tokens, null),
+	};
+}
+
+/**
+ * Builds Neuralwatt's model-discovery manager (`/v1/models`). The endpoint is
+ * public, and a key adds the models private to that account. The cache is
+ * scoped by key and base URL, with keyless discovery in its own slot, so one
+ * account's roster never reaches another.
+ */
+export function neuralwattModelManagerOptions(
+	config?: SimpleProviderConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? NEURALWATT_BASE_URL;
+	return {
+		providerId: "neuralwatt",
+		cacheProviderId: resolveModelCacheProviderId("neuralwatt", { apiKey, baseUrl }),
+		// Live rows own the roster, reasoning, modality, and price. An explicit
+		// `0` cache-read rate stays `0`.
+		dynamicModelsAuthoritative: true,
+		dynamicReasoningAuthoritative: true,
+		dynamicInputAuthoritative: true,
+		dynamicCostAuthoritative: true,
+		fetchDynamicModels: () =>
+			fetchOpenAICompatibleModels({
+				api: "openai-completions",
+				provider: "neuralwatt",
+				baseUrl,
+				apiKey,
+				fetch: config?.fetch,
+				mapModel: mapNeuralwattModel,
+			}),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Inception
 // ---------------------------------------------------------------------------
 

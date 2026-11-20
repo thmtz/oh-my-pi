@@ -214,10 +214,23 @@ async function resolveProviderApiKey(providerId: string, catalog: CatalogDiscove
 }
 type CatalogProviderFetchResult = { models: ModelSpec[]; succeeded: boolean };
 
+/**
+ * The credential catalog generation supplies to a provider's discovery
+ * endpoint, if any. An `anonymous` discovery entry never gets one, so a
+ * maintainer's key in the environment or a stored login cannot bundle that
+ * account's private rows.
+ */
+export async function resolveCatalogDiscoveryApiKey(
+	descriptor: CatalogProviderDescriptor,
+): Promise<string | undefined> {
+	if (descriptor.catalogDiscovery.anonymous) return undefined;
+	return resolveProviderApiKey(descriptor.providerId, descriptor.catalogDiscovery);
+}
+
 async function fetchProviderModelsFromCatalog(
 	descriptor: CatalogProviderDescriptor,
 ): Promise<CatalogProviderFetchResult> {
-	const apiKey = await resolveProviderApiKey(descriptor.providerId, descriptor.catalogDiscovery);
+	const apiKey = await resolveCatalogDiscoveryApiKey(descriptor);
 
 	if (!apiKey && !allowsUnauthenticatedCatalogDiscovery(descriptor)) {
 		console.log(`No ${descriptor.catalogDiscovery.label} credentials found (env or agent.db), using fallback models`);

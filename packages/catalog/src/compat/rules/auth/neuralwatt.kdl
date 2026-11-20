@@ -1,0 +1,11 @@
+// `/v1/models` is public without a key but answers 401 to an invalid bearer
+// key, so login validates the pasted key there without spending inference.
+auth "neuralwatt" {
+	name "Neuralwatt"
+	login "api-key" {
+		auth-url "https://portal.neuralwatt.com/dashboard/keys"
+		instructions "Create or copy your API key from the Neuralwatt portal (Dashboard > API Keys)"
+		prompt "Paste your Neuralwatt API key" placeholder="sk-..."
+		validate "models-endpoint" label="Neuralwatt" url="https://api.neuralwatt.com/v1/models"
+	}
+}

@@ -1621,6 +1621,35 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/nano
 
 - **Provider entry (`nanogpt`)**: `packages/catalog/src/compat/rules/providers/nanogpt.kdl` declares default model `openai/gpt-5.5`. Environment keys: `NANO_GPT_API_KEY`.
 
+## Neuralwatt (`neuralwatt`)
+
+Neuralwatt Cloud serves open-weight models behind an OpenAI-compatible API at `https://api.neuralwatt.com/v1`. It uses the OpenAI Chat Completions transport (`openai-completions`).
+
+### Special casings
+
+Provider-wide rules in `packages/catalog/src/compat/rules/providers/neuralwatt.kdl`:
+
+- Rows report `capabilities.developer_role: false`, so `supports-developer-role #false` sends instructions as `system`. Output caps ride `max_tokens` (`max-tokens-field`), and no `store` field is sent.
+- `clamp-output-to-model-max` sends up to each model's reported `max_output_tokens` instead of the generic 64000 ceiling. Where a row reports null (no cap below the context window), `max-tokens-fallback 131072` sets the limit. omp keeps one output limit per model, so 131072 is both the default request and the cap on those rows.
+- Models stream reasoning in `reasoning_content` or `reasoning`, depending on the model. `replay-reasoning-content #true` sends it back with each assistant turn, so reasoning carries across tool calls. Tracking aliases (`nw-large`, `nw-flash`, `nw-small`) carry no model identity, so without this rule an alias drops reasoning that its target id keeps through class rules. The aliases also lack their targets' other class flags (for example `moonshot-mfjs` tool schemas on `kimi-k3.1-pro`), and tool-call follow-ups on them succeed without those flags.
+
+### Auth & usage
+
+- Login kind `api-key` is declared in `packages/catalog/src/compat/rules/auth/neuralwatt.kdl` and links to `https://portal.neuralwatt.com/dashboard/keys`. Environment key: `NEURALWATT_API_KEY`.
+- Validation uses `models-endpoint` against `https://api.neuralwatt.com/v1/models`, which is public without a key but answers 401 to an invalid bearer, so the probe validates the pasted key and bills nothing.
+- A key adds the models private to that account, so the model cache namespace hashes the key and base URL (`neuralwatt` is in `CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS`). Keyless discovery has its own slot.
+
+### Catalog model handling
+
+- The default model is `nw-large`, a tracking alias that moves to newer models over time, so the default never names a retired id.
+- `allow-unauthenticated #true` lets the runtime refresh the public roster before login. A successful fetch replaces the bundled rows, and live rows own reasoning, modality and price (`dynamicReasoningAuthoritative`, `dynamicInputAuthoritative`, `dynamicCostAuthoritative`).
+- The `discovery` entry sets `anonymous=#true`, so `gen:models` never sends a key and account-private rows never reach the bundle.
+- `mapNeuralwattModel` reads model facts from `metadata`: `display_name`, `pricing` (`input_per_million`, `output_per_million`, `cached_input_per_million`), `limits.max_context_length` / `max_output_tokens`, and `capabilities.vision` / `tools` / `reasoning`. `capabilities.audio_input` has no catalog representation.
+- `metadata.reasoning.supported_efforts` lists the efforts each model serves, with `default_effort` and `mandatory`. `none` is the off value, not an effort. Rows that list it disable reasoning with `reasoning_effort: "none"` (`none-effort`), and `mandatory` rows clamp to the lowest effort. The served efforts are the selectable ladder. `effort_aliases` says what the server does with each other effort, and the mapper puts those aliases in the effort maps, so a configured `minimal` on `mimo-v2.6-pro` sends `none` and `high` on `nw-small` sends `xhigh`.
+- The mapper always sets `requiresEffort` and the effort maps, so class rules cannot make an optional row mandatory or remap its efforts (the Kimi K3 rules would otherwise send `high` for `medium` on `kimi-k3.1-pro`). Rows set `trustExplicitThinkingOnly`, so a row with no efforts gets no guessed selector, and catalog generation keeps the live ladder.
+- Some rows default to `none`, such as `gemma-4-31b`. omp cannot express a default of off, so it turns reasoning on for those models at the session's default level, although the API's own default is off.
+- Deprecated rows and rows without tool calling (decision models such as `mammoth-1`, served on `/v1/systemone`) are dropped. Rows without an established price (`pricing_tbd` or missing rates) stay listed with `pricingStatus: "unknown"`.
+
 ## Novita (`novita`)
 
 Novita AI is an AI cloud platform offering serverless OpenAI-compatible LLM inference for open models. It uses the OpenAI Chat Completions transport over `https://api.novita.ai/openai/v1`.
@@ -2658,6 +2687,7 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/zhip
 ## Scaleway (`scaleway`)
 
 ### Special casings
+
 - Chat discovery uses `openai-completions` at `https://api.scaleway.ai/v1` (fr-par serverless Generative APIs). `/v1/models` returns bare ids with no capability metadata, so the documented catalog is an authored seed in `packages/catalog/src/compat/rules/providers/scaleway.kdl` (`bundle="always" precedence="seed"`): it is the bundle in every regeneration and the reference live rows merge names, modalities, prices, and limits from. Discovery is authoritative (`dynamic-models-authoritative`), so a successful fetch prunes retired rows (`glm-5.2` routes to `glm-5.3` after 2026-11-16), and `skip-cross-provider-reference-fills` keeps same-id rows on other hosts (zai serves `glm-5.3` at 1M/131k) out of the bundle.
 - The roster interleaves non-chat SKUs (transcription `whisper-`, embeddings `qwen3-embedding-`/`bge-`, OCR `lightonocr-`); exclusion prefixes in `runtime/behavior.kdl` keep them out of the chat model list. `gpt-oss-120b` is excluded too: Scaleway's Chat Completions route does not support its tool calling (Scaleway recommends the Responses API for it).
 - Reasoning traces stream back on the message `reasoning` field; the shared OpenAI-completions transport already parses both shapes. Verified wire quirk: `glm-5.3` at effort `low` genuinely emits no reasoning trace on Scaleway — a serving behavior, not a parsing gap.
@@ -2665,9 +2695,11 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/zhip
 - Prices are EUR/Mtok list rates converted at the 2026-10-21 ECB reference rate (1 EUR = 1.1234 USD); cache rates Scaleway does not publish surface as `0`. Context and output caps read the documented "k" as 1,000 tokens so a serverless cap is never overstated (`glm-5.3`: 256,000 / 16,000).
 
 ### Auth & usage
+
 - Login kind `api-key` is declared in `packages/catalog/src/compat/rules/auth/scaleway.kdl`. Environment keys: `SCW_SECRET_KEY`, then legacy `SCW_API_KEY`. Validation uses `models-endpoint`: `/v1/models` answers 401 without a bearer key and 403 to a rejected one (verified 2026-10-21), so the probe rejects bad keys and bills nothing.
 
 ### Catalog model handling
+
 - **Provider entry (`scaleway`)**: `packages/catalog/src/compat/rules/providers/scaleway.kdl` declares default model `glm-5.3`. Environment keys: `SCW_SECRET_KEY`, then `SCW_API_KEY`.
 - **Thinking controls**: every reasoning card documents `none` as its off value, so thinking-off sends `reasoning_effort: "none"`; omitting the field falls back to the server default (`medium`) and keeps reasoning on. GLM 5.3/5.2 diverge from the lineage glob in `classes/glm.kdl` (thinking cannot be disabled): exact-id `priority=20` residues outrank it so the Scaleway cards keep their `none` tier. Qwen 3.8 keeps its native `xhigh` tier; Mistral Medium 3.5 documents `high` only (its server default `medium` is not a valid tier, so the omp default pins `high`). Ladders are cascade rules, not seed thinking, so bare discovered rows without a bundled reference still get them.
 - **Modalities**: image input follows Scaleway's model table: DeepSeek V4.1 Flash, Qwen 3.8/3.6/3.5, Gemma 4, Mistral Medium 3.5, and Mistral Small 3.2 take images; GLM, DeepSeek V4 Flash 0731, Qwen3 235B Instruct, and Llama 3.3 are text-only.
