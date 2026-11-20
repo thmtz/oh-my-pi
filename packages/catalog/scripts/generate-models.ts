@@ -215,9 +215,10 @@ async function resolveProviderApiKey(providerId: string, catalog: CatalogDiscove
 type CatalogProviderFetchResult = { models: ModelSpec[]; succeeded: boolean };
 
 /**
- * The credential catalog generation sends to a provider's discovery endpoint,
- * if any. An `anonymous` discovery entry never gets one, so a maintainer's key
- * in the environment or a stored login cannot bundle that account's private rows.
+ * The credential catalog generation supplies to a provider's discovery
+ * endpoint, if any. An `anonymous` discovery entry never gets one, so a
+ * maintainer's key in the environment or a stored login cannot bundle that
+ * account's private rows.
  */
 export async function resolveCatalogDiscoveryApiKey(
 	descriptor: CatalogProviderDescriptor,

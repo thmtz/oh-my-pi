@@ -12,6 +12,7 @@ import type { AssistantMessage, Context, FetchImpl, Model } from "@oh-my-pi/pi-a
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { neuralwattModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 
 interface RowShape {
@@ -180,6 +181,37 @@ describe("Neuralwatt wire contract", () => {
 			"none",
 		);
 		expect((await capture("mimo-v2.6-pro", configured("mimo-v2.6-pro", Effort.Low))).reasoning_effort).toBe("high");
+	});
+
+	it("still clamps an alias outside the effort vocabulary that is not off on other transports", async () => {
+		// A custom MiniMax-M2 narrowed to `high` keeps its `medium: "adaptive"`
+		// map. Keeping `medium` would fail the Anthropic encoder before fetch.
+		const bundled = getBundledModel<"anthropic-messages">("minimax", "MiniMax-M2");
+		if (!bundled.thinking) throw new Error("bundled MiniMax-M2 lost its thinking config");
+		const narrowed: Model<"anthropic-messages"> = {
+			...bundled,
+			thinking: { ...bundled.thinking, efforts: [Effort.High] },
+		};
+		const reasoning = clampThinkingLevelForModel(narrowed, Effort.Medium);
+		expect(reasoning).toBe(Effort.High);
+		let body: Record<string, unknown> | undefined;
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+				return Response.json(
+					{ type: "error", error: { type: "invalid_request_error", message: "stop" } },
+					{ status: 400 },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		await streamSimple(narrowed, CONTEXT, {
+			apiKey: "sk-test",
+			fetch: fetchMock,
+			reasoning,
+			maxHttpAttempts: 1,
+		}).result();
+		expect(body?.thinking).toMatchObject({ type: "adaptive" });
 	});
 
 	it("sends system prompts in the system role and caps output at the model's own limit", async () => {

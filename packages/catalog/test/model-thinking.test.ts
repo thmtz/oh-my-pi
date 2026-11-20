@@ -1768,10 +1768,25 @@ describe("effortMap aliases in clampThinkingLevelForModel", () => {
 		expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.Low);
 	});
 
-	it("keeps a tier whose alias is a value outside the ladder, such as reasoning off", () => {
+	it("keeps a tier aliased to none, a value outside the effort vocabulary, on Chat Completions", () => {
 		const model = gateway([Effort.High], { high: "high", minimal: "none" });
 		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Minimal);
 		expect(clampThinkingLevelForModel(model, Effort.Low)).toBe(Effort.High);
+	});
+
+	it("climbs as before when the alias is another value outside the effort vocabulary", () => {
+		const model = gateway([Effort.High], { high: "high", medium: "adaptive" });
+		expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.High);
+	});
+
+	it("climbs as before for an alias to none on a transport other than Chat Completions", () => {
+		const model = createModel({
+			id: "example-route",
+			api: "anthropic-messages",
+			provider: "example-gateway",
+			thinking: { mode: "effort", efforts: [Effort.High], effortMap: { high: "high", minimal: "none" } },
+		});
+		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.High);
 	});
 
 	it("climbs down when the map remaps the alias target again", () => {
