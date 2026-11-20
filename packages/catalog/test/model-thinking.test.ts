@@ -1768,6 +1768,12 @@ describe("effortMap aliases in clampThinkingLevelForModel", () => {
 		expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.Low);
 	});
 
+	it("keeps a tier whose alias is a value outside the ladder, such as reasoning off", () => {
+		const model = gateway([Effort.High], { high: "high", minimal: "none" });
+		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Minimal);
+		expect(clampThinkingLevelForModel(model, Effort.Low)).toBe(Effort.High);
+	});
+
 	it("climbs down when the map remaps the alias target again", () => {
 		// Honouring `medium → high` would serialize `max` because the map sends `high` on.
 		const model = gateway([Effort.Low, Effort.High, Effort.Max], { medium: "high", high: "max" });

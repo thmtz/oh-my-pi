@@ -625,6 +625,11 @@ export interface CompiledProviderDiscovery {
 	oauthProvider?: string;
 	/** Discovery proceeds without credentials. */
 	allowUnauthenticated?: boolean;
+	/**
+	 * Generation never sends a credential, even when one is available, so rows
+	 * private to that account stay out of the bundle.
+	 */
+	anonymous?: boolean;
 }
 
 /**

@@ -4938,7 +4938,11 @@ const NEURALWATT_BASE_URL = "https://api.neuralwatt.com/v1";
  * Neuralwatt's effort vocabulary. `metadata.reasoning.supported_efforts` lists
  * the efforts the model serves, with `none` as its off value (not an Effort).
  * A `mandatory` row has no off value, so a thinking-off request clamps to the
- * lowest effort.
+ * lowest effort. `effort_aliases` says what the server does with every other
+ * effort, such as `high` to `xhigh` on `nw-small` or `minimal` to `none` on
+ * `mimo-v2.6-pro`. The served efforts stay the selectable ladder, and the
+ * aliases go in the effort maps so a configured or programmatic request for
+ * any other effort gets what the server would give it.
  *
  * `requiresEffort` and the effort maps are always set. Left unset, class
  * rules fill them in for ids they recognize. The Kimi K3 rules would then make
@@ -4960,7 +4964,15 @@ function mapNeuralwattReasoning(
 	// representation, so such rows fall back to the session's default level.
 	const defaultLevel = efforts.find(effort => effort === controls?.default_effort);
 	const mandatory = controls?.mandatory === true;
-	const effortMap: Partial<Record<Effort, string>> = Object.fromEntries(efforts.map(effort => [effort, effort]));
+	const offValue = !mandatory && wireEfforts.includes("none") ? "none" : undefined;
+	const aliases = isRecord(controls?.effort_aliases) ? controls.effort_aliases : {};
+	const effortMap: Partial<Record<Effort, string>> = {};
+	for (const effort of THINKING_EFFORTS) {
+		const target = efforts.includes(effort) ? effort : aliases[effort];
+		if (efforts.includes(target as Effort) || (offValue !== undefined && target === offValue)) {
+			effortMap[effort] = target as string;
+		}
+	}
 	return {
 		thinking: {
 			mode: "effort",
@@ -4969,7 +4981,7 @@ function mapNeuralwattReasoning(
 			requiresEffort: mandatory,
 			effortMap,
 		},
-		reasoningDisableMode: !mandatory && wireEfforts.includes("none") ? "none-effort" : "lowest-effort",
+		reasoningDisableMode: offValue !== undefined ? "none-effort" : "lowest-effort",
 		// The wire encoder reads the compat map before the thinking map.
 		reasoningEffortMap: effortMap,
 	};

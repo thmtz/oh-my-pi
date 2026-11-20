@@ -193,12 +193,12 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			return `kimi-code:models-v1:${Bun.hash(scope).toString(36)}`;
 		}
 		// Per-key rosters (Otari: one workspace's enabled models; Bifrost: one
-		// virtual key's allowed models; Neuralwatt: the public roster plus the
-		// account's private models) behind a configurable endpoint: scope by
+		// virtual key's allowed models) behind a configurable endpoint: scope by
 		// both so switching either re-runs discovery.
 		case "muse-code":
 		case "otari":
 		case "bifrost":
+		// Neuralwatt adds the account's private models to the public roster.
 		case "neuralwatt": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
 			const scope = `${options.apiKey ?? ""}\u0000${baseUrl}`;

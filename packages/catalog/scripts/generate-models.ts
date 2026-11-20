@@ -93,13 +93,6 @@ const DISCOVERY_ONLY_PROVIDERS = new Set(["ollama", "vllm", "lm-studio", "litell
  */
 const CREDENTIAL_SCOPED_PROVIDERS = new Set(["devin", "sambanova", "otari", "modal"]);
 /**
- * Providers whose `/models` is public but adds account-private rows when given
- * a key. Generation always fetches them without a credential, so a maintainer
- * with a key in the environment or a stored login cannot bundle their own
- * account's private models.
- */
-const ANONYMOUS_CATALOG_PROVIDERS = new Set(["neuralwatt"]);
-/**
  * Providers whose authored seed is the complete documented fallback
  * catalog: their previous-snapshot rows are never resurrected, so an id
  * the host retired (e.g. CoralBricks' GLM 5.3 Flash, 2026-10-07) cannot
@@ -221,11 +214,15 @@ async function resolveProviderApiKey(providerId: string, catalog: CatalogDiscove
 }
 type CatalogProviderFetchResult = { models: ModelSpec[]; succeeded: boolean };
 
-/** The credential catalog generation sends to a provider's discovery endpoint, if any. */
+/**
+ * The credential catalog generation sends to a provider's discovery endpoint,
+ * if any. An `anonymous` discovery entry never gets one, so a maintainer's key
+ * in the environment or a stored login cannot bundle that account's private rows.
+ */
 export async function resolveCatalogDiscoveryApiKey(
 	descriptor: CatalogProviderDescriptor,
 ): Promise<string | undefined> {
-	if (ANONYMOUS_CATALOG_PROVIDERS.has(descriptor.providerId)) return undefined;
+	if (descriptor.catalogDiscovery.anonymous) return undefined;
 	return resolveProviderApiKey(descriptor.providerId, descriptor.catalogDiscovery);
 }
 

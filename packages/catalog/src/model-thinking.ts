@@ -55,6 +55,9 @@ export function withoutUnverifiedThinking<T extends { reasoning?: boolean; think
  * a served tier that reaches the wire unchanged (a gateway answering `medium`
  * as `high`); otherwise it climbs down to the nearest lower tier.
  *
+ * A level the map sends to a value outside the effort vocabulary (`minimal` as
+ * `none`) is kept, so the provider sends that value.
+ *
  * Non-reasoning models always resolve to `undefined`.
  */
 export function clampThinkingLevelForModel<TApi extends Api>(
@@ -77,6 +80,11 @@ export function clampThinkingLevelForModel<TApi extends Api>(
 	const aliased = effortMap?.[requested] as Effort | undefined;
 	if (aliased !== undefined && levels.includes(aliased) && (effortMap![aliased] ?? aliased) === aliased) {
 		return aliased;
+	}
+	// An alias to a value that is no tier (`none`, reasoning off) has nothing
+	// to clamp to.
+	if (aliased !== undefined && !THINKING_EFFORTS.includes(aliased)) {
+		return requested;
 	}
 
 	const requestedIndex = THINKING_EFFORTS.indexOf(requested);

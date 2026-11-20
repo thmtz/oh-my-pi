@@ -15,13 +15,15 @@ provider "neuralwatt" {
 	dynamic-models-authoritative #true
 	// Same-id rows on other hosts describe different deployments.
 	skip-cross-provider-reference-fills #true
-	// Generation never sends a key (`ANONYMOUS_CATALOG_PROVIDERS` in
-	// `scripts/generate-models.ts`), so account-private rows stay out of the bundle.
-	discovery label="Neuralwatt" allow-unauthenticated=#true
+	// A key adds the rows private to its account. Generation sends none, so
+	// those rows stay out of the bundle.
+	discovery label="Neuralwatt" allow-unauthenticated=#true anonymous=#true
 
 	// `metadata.limits.max_output_tokens` is null where the model has no output
 	// cap below its context window (e.g. `nw-large`). Seed a budget for those
-	// rows. A reported limit always wins.
+	// rows. omp keeps one output limit per model, used as both the default
+	// request and the cap, so explicit requests on these rows stop here too.
+	// A reported limit always wins.
 	max-tokens-fallback 131072
 	// Send up to the model's own output limit instead of the generic 64000
 	// ceiling. Reported caps reach 393216, and long reasoning at high effort
@@ -34,9 +36,12 @@ provider "neuralwatt" {
 	supports-store #false
 	max-tokens-field "max_tokens"
 
-	// Models stream reasoning in `reasoning_content` or `reasoning`. Replay it
-	// in the field it arrived in. A tracking alias carries no model identity,
-	// so without this `nw-large` drops reasoning on tool-call turns that
-	// `kimi-k3.1-pro`, the model it points at, keeps through class rules.
+	// Models stream reasoning in `reasoning_content` or `reasoning`. Send it back
+	// with each assistant turn so reasoning carries across tool calls. A tracking
+	// alias carries no model identity, so without this `nw-large` drops the
+	// reasoning that `kimi-k3.1-pro`, the model it points at, keeps through
+	// class rules. The alias still lacks the target's other class flags, such
+	// as `moonshot-mfjs` tool schemas and required reasoning on tool-call
+	// turns. Tool-call follow-ups on `nw-large` succeed without them.
 	replay-reasoning-content #true
 }

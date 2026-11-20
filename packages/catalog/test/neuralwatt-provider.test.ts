@@ -510,7 +510,10 @@ describe("Neuralwatt provider discovery", () => {
 					defaultLevel: Effort.Max,
 					requiresEffort: false,
 				});
-				expect(model?.compat?.reasoningEffortMap?.[Effort.Medium]).toBe("medium");
+				// Served efforts map to themselves, and the row's aliases fill the rest.
+				const effortMap = { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "max", max: "max" };
+				expect(model?.thinking?.effortMap).toEqual(effortMap);
+				expect(model?.compat?.reasoningEffortMap).toEqual(effortMap);
 				expect(model?.compat?.reasoningDisableMode).toBe("none-effort");
 				// The provider fallback seeds the null upstream output limit.
 				expect(model?.maxTokens).toBe(131072);
@@ -519,6 +522,7 @@ describe("Neuralwatt provider discovery", () => {
 
 			const glm = byId.get("glm-5.3");
 			expect(glm?.thinking).toMatchObject({ efforts: [Effort.Low, Effort.High, Effort.Max], requiresEffort: true });
+			expect(glm?.thinking?.effortMap?.[Effort.Medium]).toBe("high");
 			expect(glm?.compat?.reasoningDisableMode).toBe("lowest-effort");
 
 			// A reported output limit wins over the fallback.
@@ -543,6 +547,7 @@ describe("Neuralwatt provider discovery", () => {
 		const kimi = models.find(model => model.id === "kimi-k3.1-pro");
 		expect(kimi?.thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.Max]);
 		expect(kimi?.thinking?.requiresEffort).toBe(false);
+		expect(kimi?.thinking?.effortMap).toMatchObject({ medium: "medium", xhigh: "max", minimal: "low" });
 		expect(models.find(model => model.id === "qwen3.6-35b-fast")?.thinking).toBeUndefined();
 	});
 
