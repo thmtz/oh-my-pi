@@ -1630,21 +1630,23 @@ Neuralwatt Cloud serves open-weight models behind an OpenAI-compatible API at `h
 Provider-wide rules in `packages/catalog/src/compat/rules/providers/neuralwatt.kdl`:
 
 - **System role**: rows report `capabilities.developer_role: false`, so `supports-developer-role #false` sends instructions as `system`. Output caps ride `max_tokens` (`max-tokens-field`), and no `store` field is sent.
-- **Output fallback**: `metadata.limits.max_output_tokens` is null where the deployment sets no output cap below the context window (`nw-large`, `glm-5.3`). `max-tokens-fallback 131072` seeds those rows. A reported limit always wins.
+- **Output limits**: `clamp-output-to-model-max` sends up to each model's reported `max_output_tokens` instead of the generic 64000 ceiling. Where a row reports null (no cap below the context window), `max-tokens-fallback 131072` seeds the limit.
 - **Reasoning replay**: models stream reasoning in `reasoning_content` or `reasoning`, depending on the model. `replay-reasoning-content #true` sends it back in the field it arrived in. Tracking aliases (`nw-large`, `nw-flash`, `nw-small`) carry no model identity, so without this rule an alias drops reasoning on tool-call turns that its target id keeps through class rules.
 
 ### Auth & usage
 
 - Login kind `api-key` is declared in `packages/catalog/src/compat/rules/auth/neuralwatt.kdl` and links to `https://portal.neuralwatt.com/dashboard/keys`. Environment key: `NEURALWATT_API_KEY`.
 - Validation uses `models-endpoint` against `https://api.neuralwatt.com/v1/models`, which is public without a key but answers 401 to an invalid bearer, so the probe validates the pasted key and bills nothing.
+- **Cache scope**: a key adds the models private to that account, so the model cache namespace hashes the key and base URL (`neuralwatt` is in `CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS`). Keyless discovery has its own slot.
 
 ### Catalog model handling
 
 - **Provider entry (`neuralwatt`)**: default model `nw-large`, a tracking alias that moves to newer models over time, so the default never names a retired id.
-- **Unauthenticated, authoritative discovery**: `neuralwattModelManagerOptions` (`packages/catalog/src/provider-models/openai-compat.ts`) fetches `/v1/models` with or without a key. With a key the list may also include models private to that account. A successful fetch replaces the bundled rows, and live rows own reasoning, modality and price (`dynamicReasoningAuthoritative`, `dynamicInputAuthoritative`, `dynamicCostAuthoritative`).
-- **Row mapping (`mapNeuralwattModel`)**: model facts live under `metadata`: `display_name`, `pricing` (`input_per_million`, `output_per_million`, `cached_input_per_million`), `limits.max_context_length` / `max_output_tokens`, and `capabilities.vision` / `tools` / `reasoning`.
-- **Effort ladder**: `metadata.reasoning.supported_efforts` lists the efforts each deployment serves, with `default_effort` and `mandatory`. `none` is the off value, not an effort: rows that list it disable reasoning with `reasoning_effort: "none"` (`none-effort`), and `mandatory` rows clamp to the lowest effort. Rows set `trustExplicitThinkingOnly`, so a row with no efforts gets no guessed dial and catalog generation keeps the live ladder.
-- **Dropped rows**: deprecated rows, rows without tool calling (decision models such as `mammoth-1`, served on `/v1/systemone`), and rows without an established price (`pricing_tbd` or missing rates).
+- **Keyless, authoritative discovery**: `allow-unauthenticated #true` lets the runtime refresh the public roster before login. A successful fetch replaces the bundled rows, and live rows own reasoning, modality and price (`dynamicReasoningAuthoritative`, `dynamicInputAuthoritative`, `dynamicCostAuthoritative`).
+- **Generation is anonymous**: `neuralwatt` is in `ANONYMOUS_CATALOG_PROVIDERS` (`packages/catalog/scripts/generate-models.ts`), so `gen:models` never sends a key and account-private rows never reach the bundle.
+- **Row mapping (`mapNeuralwattModel`)**: model facts live under `metadata`: `display_name`, `pricing` (`input_per_million`, `output_per_million`, `cached_input_per_million`), `limits.max_context_length` / `max_output_tokens`, and `capabilities.vision` / `tools` / `reasoning`. `capabilities.audio_input` has no catalog representation.
+- **Effort ladder**: `metadata.reasoning.supported_efforts` lists the efforts each model serves, with `default_effort` and `mandatory`. `none` is the off value, not an effort. Rows that list it disable reasoning with `reasoning_effort: "none"` (`none-effort`), and `mandatory` rows clamp to the lowest effort. The mapper always sets `requiresEffort` and an identity effort map, so class rules cannot make an optional row mandatory or remap its efforts (the Kimi K3 rules would otherwise send `high` for `medium` on `kimi-k3.1-pro`). Rows set `trustExplicitThinkingOnly`, so a row with no efforts gets no guessed selector, and catalog generation keeps the live ladder. A `none` default has no representation, so those rows start at the session's default level.
+- **Dropped and unpriced rows**: deprecated rows and rows without tool calling (decision models such as `mammoth-1`, served on `/v1/systemone`) are dropped. Rows without an established price (`pricing_tbd` or missing rates) stay listed with `pricingStatus: "unknown"`.
 
 ## Novita (`novita`)
 

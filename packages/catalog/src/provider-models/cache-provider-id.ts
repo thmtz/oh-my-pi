@@ -50,6 +50,9 @@ const CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS: Readonly<Record<string, true>> = 
 	// A Modal proxy token is workspace-scoped and the roster is the endpoints it
 	// may call, so a shared namespace would serve one workspace's ids to another.
 	modal: true,
+	// Neuralwatt's /v1/models adds the models private to the key's account, and
+	// discovery is authoritative.
+	neuralwatt: true,
 };
 
 /** Whether a provider's model-cache namespace requires its resolved credential. */
@@ -74,6 +77,8 @@ export function getDefaultModelDiscoveryBaseUrl(providerId: string): string | un
 			return normalizeModalBaseUrl(Bun.env.MODAL_BASE_URL);
 		case "otari":
 			return Bun.env.OTARI_BASE_URL?.trim() || "https://api.otari.ai/api/v1";
+		case "neuralwatt":
+			return "https://api.neuralwatt.com/v1";
 		case "bifrost":
 			return Bun.env.BIFROST_BASE_URL?.trim() || "http://localhost:8080/v1";
 		case "opencode-go":
@@ -188,11 +193,13 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			return `kimi-code:models-v1:${Bun.hash(scope).toString(36)}`;
 		}
 		// Per-key rosters (Otari: one workspace's enabled models; Bifrost: one
-		// virtual key's allowed models) behind a configurable endpoint: scope by
+		// virtual key's allowed models; Neuralwatt: the public roster plus the
+		// account's private models) behind a configurable endpoint: scope by
 		// both so switching either re-runs discovery.
 		case "muse-code":
 		case "otari":
-		case "bifrost": {
+		case "bifrost":
+		case "neuralwatt": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
 			const scope = `${options.apiKey ?? ""}\u0000${baseUrl}`;
 			return `${providerId}:models-v1:${Bun.hash(scope).toString(36)}`;
